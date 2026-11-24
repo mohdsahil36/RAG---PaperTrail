@@ -1,0 +1,36 @@
+# Telling python packaging tools how to build the project
+[build-system]
+# Finds and packages our python code
+requires = ["setuptools>=68"]  
+build-backend = "setuptools.build_meta"
+
+[project]
+# Defines the project's name, version, and requirements.
+name = "rag-document-assistant"
+version = "0.1.0"
+description = "A document question-answering system using retrieval-augmented generation"
+# Declares the minimum supported Python version.
+requires-python = ">=3.11"
+dependencies=[
+    "pymupdf",
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "langchain-text-splitters",
+    "sentence-transformers",
+    "chromadb",
+    "google-genai",
+    "httpx2",
+    "python-dotenv",
+    "rank-bm25"
+]
+
+[tool.setuptools.packages.find]
+# Tells the package finder to look inside src/.
+where = ["src"]
+
+# For telling python where are the test files located
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]

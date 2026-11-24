@@ -1,0 +1,6 @@
+# Sample/test fixture data, not source code
+data/
+
+# Tooling caches
+.pytest_cache/
+**/__pycache__/

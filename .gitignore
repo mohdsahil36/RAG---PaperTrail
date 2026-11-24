@@ -1,0 +1,53 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Generated package metadata and builds
+*.egg-info/
+build/
+dist/
+
+# Secrets (never commit API keys)
+.env
+.env.*
+!.env.example
+
+# Test and tooling caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS / editor noise
+.DS_Store
+.idea/
+*.swp
+
+# Local-only learning / agent requirement notes (not shared on remote)
+# Put personal scratch rules here; shared project rules stay in .cursor/rules/
+.cursor/rules/local/
+docs/local/
+
+# graphify graphs (auto-generated, not source)
+**/.graphify/
+
+# Chroma vector store (runtime data, not source)
+backend/data/chroma/
+
+# Uploaded PDFs — keep only the development baseline
+backend/data/pdfs/*.pdf
+!backend/data/pdfs/employee_handbook.pdf
+
+# Other data folder noise
+backend/data/sample.txt
+backend/data/.DS_Store
+
+# Claude / Cursor / VSCode tooling (local agent config, not project source)
+CLAUDE.md
+.cursor/
+.vscode/
+backend/hooks/
+backend/hooks.json
+backend/rules/
