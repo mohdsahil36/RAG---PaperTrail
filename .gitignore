@@ -28,7 +28,7 @@ htmlcov/
 # Local-only learning / agent requirement notes (not shared on remote)
 # Put personal scratch rules here; shared project rules stay in .cursor/rules/
 .cursor/rules/local/
-docs/local/
+docs/
 
 # graphify graphs (auto-generated, not source)
 **/.graphify/

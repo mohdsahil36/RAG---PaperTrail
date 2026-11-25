@@ -22,7 +22,7 @@ dependencies=[
     "google-genai",
     "httpx2",
     "python-dotenv",
-    "rank-bm25"
+    "rank-bm25",
 ]
 
 [tool.setuptools.packages.find]
@@ -34,3 +34,7 @@ where = ["src"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "regression: live Gemini calls — run with pytest -m regression",
+]
+addopts = "-m 'not regression'"
