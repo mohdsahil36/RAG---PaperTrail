@@ -7,15 +7,15 @@ Status is updated from the daily and monthly updates. See the [progress log](#pr
 
 ## Now
 
-**Current step:** Part 2, [step 7: Prompt engineering and LLM application development](#7-prompt-engineering-and-llm-application-development). Streaming closed (2026-11-23): `POST /answer/stream` SSE, generator, frontend, docs. Next: prompt regression tests → function/tool calling → model fallback.
+**Current step:** Part 2, [step 7: Prompt engineering and LLM application development](#7-prompt-engineering-and-llm-application-development). Function/tool calling closed (2026-11-24): `SEARCH_TOOL`, `answer_with_tools`, `ask_question_with_tools`, `POST /answer/tools`. Total done: **98**.
 
 **How we work:** evolve the **app** on the Part 2 path, and keep closing earlier unchecked topics **in parallel** (theory + code when it fits — e.g. backprop while we reason about MiniLM/Gemini; DI when we touch FastAPI). Not a separate “stop the product” semester.
 
-**Next actions** (2026-11-23):
+**Next actions** (2026-11-24):
 
-1. **Prompt regression testing** — snapshot suite: fixed questions → assert `found: true` + expected source headings. Closes the gap between mocked tests and real prompt behaviour.
-2. **Function / tool calling** — Gemini calls `search_documents` as a declared tool; architecture bridge to agents.
-3. **Model fallback** — second model in `.env`, retry on 429/404.
+1. **Tests for tool calling path** — mock `answer_with_tools`; assert `search_documents` called with model's query; assert grounded `AskResponse`.
+2. **Model fallback** — second model in `.env`, retry on 429/404.
+3. **Prompt regression testing** — snapshot suite: fixed questions → assert `found: true` + expected source headings.
 4. **Between Phase 8 and 9:** query expansion + parent-child retrieval (Phase 7 leftovers — one session).
 5. Then [step 8 memory](#8-context-engineering-and-memory) → agents.
 6. Ongoing: foundation / early-gap backfill (generators, NN/loss/backprop) — tick when explainable + linked to the project.
@@ -62,7 +62,7 @@ Part 1 topics only. The "Also covered" list is not counted.
 | Phase 5: Vector databases | 8 | 0 | 2 | 12 |
 | Phase 6: Core RAG engineering | 14 | 0 | 0 | 15 |
 | Phase 7: Advanced retrieval and RAG | 9 | 0 | 3 | 15 |
-| Phase 8: Prompt engineering and LLM application development | 6 | 0 | 4 | 15 |
+| Phase 8: Prompt engineering and LLM application development | 8 | 0 | 4 | 15 |
 | Phase 9: Context engineering and memory | 0 | 0 | 0 | 19 |
 | Phase 10: Agent engineering | 0 | 0 | 0 | 21 |
 | Phase 11: Agent frameworks and protocols | 0 | 0 | 2 | 16 |
@@ -74,7 +74,7 @@ Part 1 topics only. The "Also covered" list is not counted.
 | Phase 17: Multimodal AI | 0 | 0 | 0 | 11 |
 | Phase 18: Advanced model engineering | 0 | 0 | 0 | 11 |
 | Phase 19: AI system design and interviews | 0 | 1 | 0 | 18 |
-| **Total** | **96** | **1** | **30** | **323** |
+| **Total** | **98** | **1** | **30** | **323** |
 
 ---
 
@@ -234,8 +234,8 @@ Ordered from neural network basics up to LLMs. LoRA, QLoRA and quantisation are 
 - [x] Constraints and output contracts *(theory + code: found/citations rules;* `LLMResponse` *shape; citation range check in* `ask_question`*)*
 - [x] Structured output generation
 - [x] JSON schema validation *(theory + code: Gemini* `response_schema=LLMResponse` */* `LLMRewriteResponse`*; bad parse →* `LLMError`*)*
-- [ ] Function calling
-- [ ] Tool calling
+- [x] Function calling *(theory + code: `FunctionDeclaration` / `SEARCH_TOOL` in `llm_client.py`; `answer_with_tools` call 1; Gemini picks search query via tool call; 2026-11-24)*
+- [x] Tool calling *(theory + code: `ask_question_with_tools` two-call loop → `POST /answer/tools`; tool query feeds `search_documents`; answer via standard `generate_answer`; thinking model limitation noted; tests pending 2026-11-25)*
 - [x] Streaming responses *(theory + code:* `stream_ask_question_events` *generator →* `POST /answer/stream` *SSE;* `stream_answer` *with* `generate_content_stream`*;* `_citations_from_answer` *on accumulated plain text; frontend Route Handler +* `streamAskQuestion`*; 3 stream generator tests; 2026-11-23)*
 - [ ] Prompt versioning
 - [ ] Prompt testing and regression testing *(partly covered:* `test_prompt_builder.py`*; no prompt snapshot suite yet)*

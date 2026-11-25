@@ -36,25 +36,23 @@ Do **not** park B forever. Do **not** make B the whole day unless you choose tha
 
 ---
 
-## Plan: Tuesday 2026-11-24
+## Plan: Wednesday 2026-11-25
 
-**Resume point:** Streaming closed (40a/40b/40c/42 done). Prompt regression theory done (partly covered). Function/tool calling theory done — ready to build.
+**Resume point:** Tool calling closed (43a/43b/43c done). Tests pending. `answer_with_tool_result_and_context` built but not used in production path — kept for Phase 10 agent loop.
 
-**Day goal:** Build `ask_question_with_tools` — Gemini function calling, two-call loop, `POST /answer/tools`.
+**Day goal:** Tests for tool calling path, then model fallback.
 
-**Know first (before coding):** Gemini `FunctionDeclaration` schema (name, description, parameters as JSON Schema); how `contents` grows across turns (user → model function_call → function_response → model answer).
+**Know first:** mock `answer_with_tools` — patch at the service layer, not llm_client, so the test stays fast and focused on orchestration logic.
 
 ### 1. Recall
-- What does Gemini receive on the first tool call request, and what does it reply with instead of an answer?
-- Why is the tool call loop a minimum of two LLM calls?
+- What does `answer_with_tools` return and why do we pass `_` (discard `model_content`) in `ask_question_with_tools`?
+- Why does the tool path use `generate_answer` for call 2 instead of `answer_with_tool_result_and_context`?
 
 ### 2. Important work (Track A)
 | # | Task | Done when |
 |---|---|---|
-| 43a | `FunctionDeclaration` for `search_documents` in `llm_client.py` | Schema declared; name, description, parameters correct |
-| 43b | `ask_question_with_tools` in `ask_service.py` | Two-call loop: question → tool_call → search → answer; grounding rule enforced |
-| 43c | `POST /answer/tools` route | Swagger returns grounded answer with sources |
-| 43d | Tests | Mock tool call response; assert search called with model’s args; assert answer returned |
+| 43d | Tests for tool calling path | Mock `answer_with_tools`; assert `search_documents` called with model’s query; assert grounded `AskResponse` |
+| 45 | Model fallback — second model in `.env`, retry on 429/404 | `LLMError` on primary → retry on fallback model |
 
 ### 3. Track B (alongside — light)
 | # | Task | Done when |
@@ -64,14 +62,27 @@ Do **not** park B forever. Do **not** make B the whole day unless you choose tha
 ### 4. Docs
 | # | Task | Done when |
 |---|---|---|
-| 44 | `design-notes.md` Part I + pipeline stage 13 for tool calling path | Only after 43c ships |
+| 44 | `design-notes.md` Part I + pipeline stage 13 for tool calling path | Only after 43d done |
 
 ### 5. Stretch (optional)
 | # | Task | Done when |
 |---|---|---|
 | — | Prompt injection hardening — explicit instruction in `SYSTEM_PROMPT`, one break-attempt test | Before moving to memory |
 
-**After tool calling:** model fallback → prompt injection close-out → Phase 7 retrieval leftovers (query expansion, parent-child) → Phase 9 memory.
+**After model fallback:** prompt injection close-out → Phase 7 retrieval leftovers (query expansion, parent-child) → Phase 9 memory.
+
+---
+
+## Done Tuesday 2026-11-24
+
+| Block | Result |
+|---|---|
+| 43a | `SEARCH_TOOL` `FunctionDeclaration` in `llm_client.py` — `types.Type` enum fix, `mode=ANY` |
+| 43b | `answer_with_tools` (call 1) + `answer_with_tool_result_and_context` (call 2, kept for Phase 10) |
+| 43b | `ask_question_with_tools` — tool query → `search_documents` → `generate_answer` → `AskResponse` |
+| 43c | `POST /answer/tools` route — controller + route; Swagger confirmed working |
+| Fix | Thinking model (`gemini-3.5-flash-lite`) ignores `tool_config=NONE` on multi-turn — switched call 2 to standard `generate_answer` path |
+| Roadmap | Function calling + Tool calling ticked; total **98** done |
 
 ---
 

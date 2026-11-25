@@ -51,3 +51,6 @@ CLAUDE.md
 backend/hooks/
 backend/hooks.json
 backend/rules/
+
+# Claude auto-memory and session notes (local only, never committed)
+memory/

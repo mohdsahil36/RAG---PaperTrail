@@ -104,3 +104,100 @@ def stream_answer(system_prompt:str,user_prompt:str):
         text=chunk.text
         if text: # skip empty deltas
             yield text
+
+# what Gemini reads to know what tools exist — no Python code is exposed, only this schema
+SEARCH_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="search_documents",  # Gemini sends this exact string back in function_call.name
+            description="Search the uploaded documents for passages relevant to the question. Always call this before answering.",  # Gemini reads this to decide whether to call the tool
+            parameters=types.Schema(
+                type=types.Type.OBJECT,  # top-level shape is always OBJECT when you have named args
+                properties={
+                    "query": types.Schema(
+                        type=types.Type.STRING,
+                        description="The search query derived from the user's question.",  # Gemini fills this — may rephrase the user's question for better retrieval
+                    ),
+                },
+                required=["query"],  # Gemini must always provide a query — no empty calls
+            ),
+        )
+    ]
+)
+
+def answer_with_tools(question: str) -> tuple[dict, types.Content]:
+    # CALL 1 of the tool calling loop
+    # sends the user question + SEARCH_TOOL to Gemini
+    # Gemini does not answer — it returns a function_call with a better search query
+    # returns: tool_args (the query Gemini chose) + model_content (Gemini's raw response)
+    # model_content is passed unchanged into call 2 — rebuilding it loses the thought_signature Gemini embeds
+    try:
+        response = _get_client().models.generate_content(
+            model=MODEL_NAME,
+            contents=question,
+            config=types.GenerateContentConfig(
+                temperature=TEMPERATURE,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                tools=[SEARCH_TOOL],
+                tool_config=types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.ANY)  # ANY = Gemini must call a tool, cannot answer directly
+                ),
+            ),
+        )
+    except errors.APIError as e:
+        raise LLMError(f"Gemini returned error {e.code}: {e.message}") from e
+    except httpx2.RequestError as e:
+        raise LLMError("No reply from Gemini (timeout or network)") from e
+    candidate = response.candidates[0] if response.candidates else None      # first (usually only) reply
+    model_content = candidate.content if candidate else None                  # the full Content object — role=model, parts=[function_call]
+    parts = model_content.parts if model_content else None                    # list of Part objects inside the response
+    if not parts:
+        raise LLMError("Gemini did not return a function_call on the first turn")
+    fc_part = next((p for p in parts if p.function_call is not None), None)  # the Part that holds the function_call
+    if fc_part is None or fc_part.function_call is None:
+        raise LLMError("Gemini did not return a function_call on the first turn")
+    tool_args = dict(fc_part.function_call.args or {})                        # e.g. {"query": "annual leave entitlement days"}
+    return tool_args, model_content  # type: ignore[return-value]
+
+
+def answer_with_tool_result_and_context(question: str, model_content: types.Content, tool_result: str, system_prompt: str) -> str:
+    # CALL 2 of the tool calling loop
+    # sends the full conversation history to Gemini so it has context to write the grounded answer:
+    #   turn 1 (user)  — the original question
+    #   turn 2 (model) — Gemini's call 1 response (model_content), passed as-is to preserve thought_signature
+    #   turn 3 (user)  — our function_response carrying the retrieved passages (tool_result)
+    # Gemini reads all three turns and writes the final plain-text answer with [n] citations
+    contents = [
+        types.Content(role="user", parts=[types.Part(text=question)]),
+        model_content,  # original Content object from call 1 — not rebuilt; thought_signature intact
+        types.Content(
+            role="user",
+            parts=[types.Part(function_response=types.FunctionResponse(
+                name="search_documents",
+                response={"result": tool_result},  # formatted passages string — what search_documents returned
+            ))]
+        ),
+    ]
+    try:
+        response = _get_client().models.generate_content(
+            model=MODEL_NAME,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,  # GROUNDING_RULES — answer only from passages
+                temperature=TEMPERATURE,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                tool_config=types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.NONE)  # NONE = must answer in text, no more tool calls
+                ),
+            ),
+        )
+    except errors.APIError as e:
+        raise LLMError(f"Gemini returned error {e.code}: {e.message}") from e
+    except httpx2.RequestError as e:
+        raise LLMError("No reply from Gemini (timeout or network)") from e
+    candidate = response.candidates[0] if response.candidates else None
+    parts = candidate.content.parts if (candidate and candidate.content) else None
+    text = "".join(p.text for p in parts if p.text) if parts else ""  # join all text parts — response.text can be None for multi-part replies
+    if not text:
+        raise LLMError("Gemini returned an empty answer on the second turn")
+    return text
