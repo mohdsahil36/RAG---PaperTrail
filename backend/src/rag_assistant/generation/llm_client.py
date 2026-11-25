@@ -15,6 +15,7 @@ TEMPERATURE=0.3 # low value so the answers stay close to the passages
 MAX_OUTPUT_TOKENS=500 # max length of the answer , around 2000 characters
 TIMEOUT_MS=15_000 # how long one try waits for Gemini , 15 seconds
 MAX_ATTEMPTS=2 # the SDK counts the first try too , so 1 call + 1 retry , around 30 seconds in the worst case
+FALLBACK_MODEL_NAME=os.getenv("GEMINI_FALLBACK_MODEL","gemini-2.0-flash-lite")
 
 # why not use AskResponse from ask_schema.py? LLMResponse is the answer the LLM sends , AskResponse is what the end user will receive from us
 class LLMResponse(BaseModel):
@@ -39,24 +40,37 @@ def _get_client()->genai.Client:
         http_options=types.HttpOptions(timeout=TIMEOUT_MS,retry_options=retry)
     )
 
+def _call_with_fallback(fn):
+    try:
+        return fn(MODEL_NAME)
+    except errors.APIError as e:
+        if e.code not in (429, 404):
+            raise LLMError(f"Primary model error {e.code}: {e.message}") from e
+        if FALLBACK_MODEL_NAME is None:
+            raise LLMError(f"Primary model returned {e.code} and no fallback model is configured") from e
+        try:
+            return fn(FALLBACK_MODEL_NAME)
+        except errors.APIError as e2:
+            raise LLMError(f"Fallback model error {e2.code}: {e2.message}") from e2
+        except httpx2.RequestError as e2:
+            raise LLMError("Fallback model did not reply (timeout or network)") from e2
+    except httpx2.RequestError as e:
+        raise LLMError("Primary model did not reply (timeout or network)") from e
 
 def generate_answer(system_prompt:str,user_prompt:str)->LLMResponse:
-    try:
-        response=_get_client().models.generate_content(
-            model=MODEL_NAME,
-            contents=user_prompt, # numbered passages and the question
+    response = _call_with_fallback(
+        lambda model_name: _get_client().models.generate_content(
+            model=model_name, # wrapper picks the model (primary or fallback) and passes it as model_name — lambda receives it here and plugs it into the API call
+            contents=user_prompt,
             config=types.GenerateContentConfig(
-                system_instruction=system_prompt, # the fixed rules
+                system_instruction=system_prompt,
                 temperature=TEMPERATURE,
                 max_output_tokens=MAX_OUTPUT_TOKENS,
-                response_mime_type="application/json", # ask for JSON instead of free text
-                response_schema=LLMResponse, # the JSON has to match this shape
-            ),
+                response_mime_type="application/json",
+                response_schema=LLMResponse,
+            )
         )
-    except errors.APIError as e: # Gemini sent back an error , e.g. 429 , 5xx or a wrong model name
-        raise LLMError(f"Gemini returned error {e.code}: {e.message}") from e
-    except httpx2.RequestError as e: # no reply at all , timeout or no network
-        raise LLMError("No reply from Gemini (timeout or network)") from e
+    )
     if not isinstance(response.parsed,LLMResponse): # parsed is None when the reply is blocked , cut off or not valid JSON
         raise LLMError("Gemini reply is empty or does not match LLMResponse")
     return response.parsed
@@ -86,21 +100,18 @@ def rewrite_userQuery(model_name:str,temperature:float,max_output_tokens:int,use
 
 def stream_answer(system_prompt:str,user_prompt:str):
     # plain text pieces for /answer/stream — no JSON schema (unlike generate_answer)
-    try:
-        stream=_get_client().models.generate_content_stream(
-            model=MODEL_NAME,
+    response = _call_with_fallback(
+        lambda model_name: _get_client().models.generate_content_stream(
+            model=model_name, # wrapper picks the model (primary or fallback) and passes it as model_name — lambda receives it here and plugs it into the API call
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 temperature=TEMPERATURE,
                 max_output_tokens=MAX_OUTPUT_TOKENS,
-            ),
+            )
         )
-    except errors.APIError as e:
-        raise LLMError(f"Gemini returned error {e.code}: {e.message}") from e
-    except httpx2.RequestError as e:
-        raise LLMError("No reply from Gemini (timeout or network)") from e
-    for chunk in stream:
+    )
+    for chunk in response:
         text=chunk.text
         if text: # skip empty deltas
             yield text
@@ -131,9 +142,9 @@ def answer_with_tools(question: str) -> tuple[dict, types.Content]:
     # Gemini does not answer — it returns a function_call with a better search query
     # returns: tool_args (the query Gemini chose) + model_content (Gemini's raw response)
     # model_content is passed unchanged into call 2 — rebuilding it loses the thought_signature Gemini embeds
-    try:
-        response = _get_client().models.generate_content(
-            model=MODEL_NAME,
+    response = _call_with_fallback(
+        lambda model_name: _get_client().models.generate_content(
+            model=model_name, # wrapper picks the model (primary or fallback) and passes it as model_name — lambda receives it here and plugs it into the API call
             contents=question,
             config=types.GenerateContentConfig(
                 temperature=TEMPERATURE,
@@ -144,10 +155,7 @@ def answer_with_tools(question: str) -> tuple[dict, types.Content]:
                 ),
             ),
         )
-    except errors.APIError as e:
-        raise LLMError(f"Gemini returned error {e.code}: {e.message}") from e
-    except httpx2.RequestError as e:
-        raise LLMError("No reply from Gemini (timeout or network)") from e
+    )
     candidate = response.candidates[0] if response.candidates else None      # first (usually only) reply
     model_content = candidate.content if candidate else None                  # the full Content object — role=model, parts=[function_call]
     parts = model_content.parts if model_content else None                    # list of Part objects inside the response

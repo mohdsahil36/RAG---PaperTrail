@@ -147,3 +147,84 @@ def test_stream_llm_error_yields_error_event()->None:
         events=_parse_events(ask_service.stream_ask_question_events("What is the notice period?",5))
     assert events[-1]["type"]=="error"
     assert "boom" in events[-1]["message"]
+
+# --- tool calling path tests ---
+
+def test_tools_search_uses_gemini_query_not_original()->None:
+    # the key invariant: search_documents is called with Gemini's rewritten query, not the user's original question
+    chunks=[make_result("Annual Leave","20 days per year.",5)]
+    llm_reply=LLMResponse(found=True,answer="20 days [1].",citations=[1])
+    fake_model_content=mock.MagicMock()  # model_content is discarded in ask_question_with_tools — shape does not matter
+
+    with (
+        mock.patch.object(ask_service,"answer_with_tools",autospec=True,
+                          return_value=({"query":"annual leave entitlement days"},fake_model_content)) as fake_call1,
+        mock.patch.object(ask_service,"search_documents",autospec=True,return_value=chunks) as fake_search,
+        mock.patch.object(ask_service,"generate_answer",autospec=True,return_value=llm_reply),
+    ):
+        result=ask_service.ask_question_with_tools("How many days off do I get?",5)
+
+    # call 1 received the original user question
+    fake_call1.assert_called_once_with("How many days off do I get?")
+    # search used Gemini's rewritten query — not "How many days off do I get?"
+    fake_search.assert_called_once_with(question="annual leave entitlement days",k=5,document_id=None)
+    assert result.found is True
+    assert len(result.sources)==1
+    assert result.sources[0].heading=="Annual Leave"
+
+def test_tools_empty_search_skips_gemini_call2()->None:
+    fake_model_content=mock.MagicMock()
+    with (
+        mock.patch.object(ask_service,"answer_with_tools",autospec=True,
+                          return_value=({"query":"some query"},fake_model_content)),
+        mock.patch.object(ask_service,"search_documents",autospec=True,return_value=[]),
+        mock.patch.object(ask_service,"generate_answer",autospec=True) as fake_llm,
+    ):
+        result=ask_service.ask_question_with_tools("No match question",5)
+
+    assert result.found is False
+    assert result.sources==[]
+    fake_llm.assert_not_called()  # Gemini call 2 is skipped when search returns nothing
+
+def test_tools_llm_not_found_returns_empty_sources()->None:
+    chunks=[make_result("Pets","No pets at work.",10)]
+    llm_reply=LLMResponse(found=False,answer="",citations=[])
+    fake_model_content=mock.MagicMock()
+    with (
+        mock.patch.object(ask_service,"answer_with_tools",autospec=True,
+                          return_value=({"query":"pet policy office"},fake_model_content)),
+        mock.patch.object(ask_service,"search_documents",autospec=True,return_value=chunks),
+        mock.patch.object(ask_service,"generate_answer",autospec=True,return_value=llm_reply),
+    ):
+        result=ask_service.ask_question_with_tools("Can I bring my dog?",5)
+
+    assert result.found is False
+    assert result.sources==[]
+
+def test_tools_invalid_citations_return_not_found()->None:
+    chunks=[make_result("Resignation","Two weeks.",32)]
+    llm_reply=LLMResponse(found=True,answer="Made up.",citations=[9])  # [9] is out of range for 1 chunk
+    fake_model_content=mock.MagicMock()
+    with (
+        mock.patch.object(ask_service,"answer_with_tools",autospec=True,
+                          return_value=({"query":"notice period"},fake_model_content)),
+        mock.patch.object(ask_service,"search_documents",autospec=True,return_value=chunks),
+        mock.patch.object(ask_service,"generate_answer",autospec=True,return_value=llm_reply),
+    ):
+        result=ask_service.ask_question_with_tools("What is the notice period?",5)
+
+    assert result.found is False
+    assert result.sources==[]
+
+def test_tools_llm_error_raises()->None:
+    chunks=[make_result("Resignation","Two weeks.",32)]
+    fake_model_content=mock.MagicMock()
+    with (
+        mock.patch.object(ask_service,"answer_with_tools",autospec=True,
+                          return_value=({"query":"notice period"},fake_model_content)),
+        mock.patch.object(ask_service,"search_documents",autospec=True,return_value=chunks),
+        mock.patch.object(ask_service,"generate_answer",autospec=True,side_effect=LLMError("boom")),
+    ):
+        response=client.post("/answer/tools",json={"question":"What is the notice period?","k":5})
+
+    assert response.status_code==503
