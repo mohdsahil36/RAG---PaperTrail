@@ -16,9 +16,12 @@ These choices shape every part of the system — worth reading before the diagra
 | **Candidate quality** | Score gates → gated query rewrite → cross-encoder rerank |
 | **Hallucination control** | Service short-circuits before the LLM call if retrieval returns nothing |
 | **Citations** | Parsed from `[n]` markers, verified against retrieved chunks — not model-reported |
-| **Answer delivery** | Structured JSON (`POST /answer`) and token-by-token SSE (`POST /answer/stream`) |
-| **Evaluation** | Offline retrieval eval suite: Hit@5, MRR, latency per query |
-| **Tests** | 73 tests; Gemini and ChromaDB fully mocked |
+| **Answer delivery** | Structured JSON (`POST /answer`), token-by-token SSE (`POST /answer/stream`), and tool-calling path (`POST /answer/tools`) |
+| **Tool calling** | Gemini rewrites the search query via a `FunctionDeclaration` on call 1; grounded answer generated on call 2 |
+| **Model fallback** | `_call_with_fallback` wrapper swaps to `FALLBACK_GEMINI_MODEL` on 429 / 404 |
+| **Prompt injection** | `GROUNDING_RULES` explicitly marks passages as untrusted data; injection break-attempt test passes |
+| **Evaluation** | Offline retrieval eval suite: Hit@5, MRR, latency per query; regression suite (7 live Gemini tests) |
+| **Tests** | 91 tests (84 offline + 7 live regression); Gemini and ChromaDB fully mocked in offline suite |
 
 **Dense retrieval** uses sentence-transformer embeddings (MiniLM-L6-v2) stored in ChromaDB.  
 **BM25** is a classic keyword-based ranking function that complements dense search on exact or rare terms.  
@@ -137,7 +140,7 @@ backend/
     controller/     HTTP error mapping (LLMError → 503, else 500)
     routes/         FastAPI route definitions
     schemas/        Pydantic models
-  tests/            73 tests
+  tests/            91 tests (84 offline · 7 live regression)
 frontend/           Next.js chat UI
 docs/               Architecture decisions, pipeline walkthrough, roadmap
 ```
@@ -145,14 +148,6 @@ docs/               Architecture decisions, pipeline walkthrough, roadmap
 ---
 
 ## Roadmap
-
-**Prompt and reliability**
-- Prompt regression tests — snapshot suite over fixed questions; asserts `found: true` and expected source headings across prompt changes
-- Prompt injection hardening — explicit instruction in system prompt, break-attempt test
-
-**LLM layer**
-- Function / tool calling — Gemini calls `search_documents` as a declared tool; two-turn conversation loop; `POST /answer/tools`
-- Model fallback — secondary model in `.env`, automatic retry on 429 / 503
 
 **Retrieval**
 - Query expansion — generate multiple query variants, merge results before fusion
@@ -229,4 +224,4 @@ Swagger UI: `http://127.0.0.1:8000/docs`
 cd backend && pytest
 ```
 
-73 tests. Gemini and ChromaDB are mocked throughout. Coverage spans the ingestion pipeline, retrieval stages, hybrid fusion, reranking, the JSON and streaming ask paths, citation parsing, and error handling.
+84 tests offline (91 collected; 7 regression deselected by default). Run the live suite with `pytest -m regression`. Gemini and ChromaDB are mocked throughout the offline suite. Coverage spans the ingestion pipeline, retrieval stages, hybrid fusion, reranking, the JSON and streaming ask paths, tool calling path, citation parsing, model fallback, prompt injection, and error handling.
