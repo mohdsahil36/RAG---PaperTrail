@@ -1,5 +1,6 @@
 from rag_assistant.generation.llm_client import LLMError, answer_with_tools, generate_answer, stream_answer
-from rag_assistant.generation.prompt_builder import NOT_FOUND_ANSWER, build_prompt, build_stream_prompt
+from rag_assistant.generation.prompt_builder import build_prompt, build_stream_prompt
+from rag_assistant.generation.system_prompts import NOT_FOUND_ANSWER
 from rag_assistant.schemas.ask_schema import AskResponse,Source
 from rag_assistant.services.search_documents_service import search_documents
 from rag_assistant.storage.vector_store import SearchResult, get_parent_chunk_by_id

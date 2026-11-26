@@ -1,5 +1,6 @@
 import pytest
-from rag_assistant.generation.prompt_builder import NOT_FOUND_ANSWER, build_prompt
+from rag_assistant.generation.prompt_builder import build_prompt
+from rag_assistant.generation.system_prompts import NOT_FOUND_ANSWER
 from rag_assistant.storage.vector_store import SearchResult
 
 def make_result(heading:str,text:str,page:int)->SearchResult:

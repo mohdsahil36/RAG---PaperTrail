@@ -1,10 +1,5 @@
 from rag_assistant.storage.vector_store import SearchResult
-from rag_assistant.generation.system_prompts import (
-    NOT_FOUND_ANSWER,
-    GROUNDING_RULES,
-    SYSTEM_PROMPT,
-    STREAM_SYSTEM_PROMPT,
-)
+from rag_assistant.generation.system_prompts import SYSTEM_PROMPT, STREAM_SYSTEM_PROMPT
 
 def format_chunks(chunks:list[SearchResult])->str:
     passages:list[str]=[]
