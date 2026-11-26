@@ -23,6 +23,12 @@ class LLMResponse(BaseModel):
     answer:str # the answer text with [n] citations in it
     citations:list[int] # passage numbers the answer used , e.g. [1, 3]
 
+class RephraseResponse(BaseModel):
+    questionVariants:list[str]
+
+class DecompositionResponse(BaseModel):
+    sub_questions:list[str]
+
 class LLMRewriteResponse(BaseModel):
     new_userQuery:str
 
@@ -96,6 +102,46 @@ def rewrite_userQuery(model_name:str,temperature:float,max_output_tokens:int,use
         raise LLMError("No reply from Gemini (timeout or network)") from e
     if not isinstance(response.parsed,LLMRewriteResponse):
         raise LLMError("Gemini reply is empty or does not match LLMRewriteResponse")
+    return response.parsed
+
+_EXPAND_SYSTEM_PROMPT = "Given a search query, return 2 to 3 alternative phrasings that mean the same thing but use different words. Return only the variants as a JSON list."
+
+def expand_userQuery(user_query:str)->RephraseResponse:
+    response = _call_with_fallback(
+        lambda model_name: _get_client().models.generate_content(
+            model=model_name,
+            contents=user_query,
+            config=types.GenerateContentConfig(
+                system_instruction=_EXPAND_SYSTEM_PROMPT,
+                temperature=TEMPERATURE,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                response_mime_type="application/json",
+                response_schema=RephraseResponse,
+            )
+        )
+    )
+    if not isinstance(response.parsed, RephraseResponse):
+        raise LLMError("Gemini reply is empty or does not match RephraseResponse")
+    return response.parsed
+
+_BREAK_QUESTION_SYSTEM_PROMPT="Break the following question into 2 to 3 independent sub-questions that together cover the full meaning. Each sub-question should be answerable on its own. Return only the sub-questions."
+
+def break_userQuery(user_query:str)->DecompositionResponse:
+    response = _call_with_fallback(
+        lambda model_name: _get_client().models.generate_content(
+            model=model_name,
+            contents=user_query,
+            config=types.GenerateContentConfig(
+                system_instruction=_BREAK_QUESTION_SYSTEM_PROMPT,
+                temperature=TEMPERATURE,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                response_mime_type="application/json",
+                response_schema=DecompositionResponse,
+            )
+        )
+    )
+    if not isinstance(response.parsed, DecompositionResponse):
+        raise LLMError("Gemini reply is empty or does not match DecompositionResponse")
     return response.parsed
 
 def stream_answer(system_prompt:str,user_prompt:str):

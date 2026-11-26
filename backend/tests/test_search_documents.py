@@ -19,9 +19,9 @@ def test_strong_hit_skips_rewrite()->None:
     with (
         mock.patch.object(
             search_documents_service,
-            "_hybrid_once",
+            "_multi_query_search",
             autospec=True,
-            return_value=(chunks, 0.7, False),
+            return_value=chunks,
         ) as fake_hybrid,
         mock.patch.object(search_documents_service,"rewrite_query",autospec=True) as fake_rewrite,
         # lambda question, chunks, score_fn=None: chunks
@@ -50,10 +50,16 @@ def test_weak_hit_rewrites_and_searches_again()->None:
     with (
         mock.patch.object(
             search_documents_service,
+            "_multi_query_search",
+            autospec=True,
+            return_value=weak,
+        ) as fake_hybrid,
+        mock.patch.object(
+            search_documents_service,
             "_hybrid_once",
             autospec=True,
-            side_effect=[(weak, 0.15, False), (strong, 0.5, False)],
-        ) as fake_hybrid,
+            return_value=(strong, 0.5, False),
+        ),
         mock.patch.object(
             search_documents_service,
             "rewrite_query",
@@ -72,9 +78,7 @@ def test_weak_hit_rewrites_and_searches_again()->None:
 
     assert result==strong
     fake_rewrite.assert_called_once_with("How many leaves can I take?")
-    assert fake_hybrid.call_count==2
-    fake_hybrid.assert_any_call("How many leaves can I take?",5,None)
-    fake_hybrid.assert_any_call(rewritten,5,None)
+    fake_hybrid.assert_called_once_with("How many leaves can I take?",5,None)
 
 def test_weak_hit_llm_rewrite_failure_returns_empty()->None:
     weak=[make_result("Resignation","Give two weeks notice.",32,score=0.15)]
@@ -82,9 +86,9 @@ def test_weak_hit_llm_rewrite_failure_returns_empty()->None:
     with (
         mock.patch.object(
             search_documents_service,
-            "_hybrid_once",
+            "_multi_query_search",
             autospec=True,
-            return_value=(weak, 0.15, False),
+            return_value=weak,
         ) as fake_hybrid,
         mock.patch.object(
             search_documents_service,
@@ -98,3 +102,64 @@ def test_weak_hit_llm_rewrite_failure_returns_empty()->None:
     assert result==[]
     fake_rewrite.assert_called_once_with("How many leaves can I take?")
     fake_hybrid.assert_called_once_with("How many leaves can I take?",5,None)
+
+def test_expand_and_search_deduplicates_across_variants() -> None:
+    from rag_assistant.generation.llm_client import RephraseResponse
+    variants = RephraseResponse(questionVariants=[
+        "How many days of annual leave am I entitled to?",
+        "How many paid time off days do I get?",
+    ])
+    chunk_a = make_result("PTO", "You get 20 days.", 10, score=0.5)
+    chunk_b = make_result("Leave", "Annual leave is 20 days.", 11, score=0.4)
+    chunk_c = make_result("Holidays", "Public holidays are separate.", 12, score=0.3)
+
+    with (
+        mock.patch.object(search_documents_service, "expand_userQuery", autospec=True, return_value=variants),
+        mock.patch.object(
+            search_documents_service,
+            "_hybrid_once",
+            autospec=True,
+            side_effect=[
+                ([chunk_a, chunk_b], 0.5, True),  # variant 1
+                ([chunk_b, chunk_c], 0.4, False),  # variant 2 — chunk_b is duplicate
+            ],
+        ) as fake_hybrid,
+    ):
+        result, best_score = search_documents_service._expand_and_search("annual leave policy", 5, None)
+
+    assert fake_hybrid.call_count == 2
+    result_ids = [r["chunk_id"] for r in result]
+    assert len(result_ids) == 3                        # A, B, C — no duplicates
+    assert result_ids.count("handbook.pdf--11") == 1   # chunk_b appears once
+    assert best_score == 0.5
+
+
+def test_multi_query_search_deduplicates_across_sub_questions() -> None:
+    from rag_assistant.generation.llm_client import DecompositionResponse
+    decomposition = DecompositionResponse(sub_questions=[
+        "What is the leave policy?",
+        "How do I apply for leave?",
+    ])
+    chunk_a = make_result("PTO", "You get 20 days.", 10, score=0.5)
+    chunk_b = make_result("Leave", "Annual leave is 20 days.", 11, score=0.4)
+    chunk_c = make_result("Apply", "Submit a request form.", 12, score=0.3)
+
+    with (
+        mock.patch.object(search_documents_service, "break_userQuery", autospec=True, return_value=decomposition),
+        mock.patch.object(
+            search_documents_service,
+            "_expand_and_search",
+            autospec=True,
+            side_effect=[
+                ([chunk_a, chunk_b], 0.5),  # original question
+                ([chunk_b, chunk_c], 0.4),  # sub-q1 — chunk_b is duplicate
+                ([chunk_c], 0.3),           # sub-q2 — chunk_c is duplicate
+            ],
+        ) as fake_expand,
+    ):
+        result = search_documents_service._multi_query_search("compound question", 5, None)
+
+    assert fake_expand.call_count == 3
+    result_ids = [r["chunk_id"] for r in result]
+    assert len(result_ids) == 3                        # A, B, C — no duplicates
+    assert result_ids.count("handbook.pdf--11") == 1   # chunk_b appears once

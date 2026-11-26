@@ -5,9 +5,44 @@ from rag_assistant.services.retrieval.query_rewrite import rewrite_query
 from rag_assistant.services.retrieval.bm25 import bm25_search
 from rag_assistant.services.retrieval.rrf import reciprocal_rank_fusion
 from rag_assistant.services.retrieval.rerank import rerank
+from rag_assistant.generation.llm_client import expand_userQuery,break_userQuery
 
 MIN_SCORE=0.25 # if dense score is this or more we can directly return the results
 WEAK_DENSE_FLOOR=0.12 # less than MIN_SCORE but BM25 can help us find the relevant chunk
+
+def _multi_query_search(question:str, k:int, document_id:str | None) -> list[SearchResult]:
+    # break the question into sub-questions; run full search_documents per sub-question; merge by chunk_id
+    decomposition = break_userQuery(question)
+    sub_questions = [question] + decomposition.sub_questions
+
+    seen: dict[str, SearchResult] = {}
+
+    for query in sub_questions:
+        chunks, _ = _expand_and_search(query, k, document_id)
+        for chunk in chunks:
+            if chunk["chunk_id"] not in seen:
+                seen[chunk["chunk_id"]] = chunk
+
+    return list(seen.values())
+
+
+def _expand_and_search(question:str, k:int, document_id:str | None) -> tuple[list[SearchResult], float]:
+    # run _hybrid_once on original + each LLM-generated variant; merge by chunk_id (first occurrence wins)
+    expansion = expand_userQuery(question)
+    queries = expansion.questionVariants
+
+    seen: dict[str, SearchResult] = {}
+    best_dense_score = 0.0
+
+    for query in queries:
+        chunks, dense_score, _ = _hybrid_once(query, k, document_id)
+        if dense_score > best_dense_score:
+            best_dense_score = dense_score
+        for chunk in chunks:
+            if chunk["chunk_id"] not in seen:
+                seen[chunk["chunk_id"]] = chunk  # first occurrence = highest ranked
+
+    return list(seen.values()), best_dense_score
 
 
 def _hybrid_once(question:str,k:int,document_id:str | None)->tuple[list[SearchResult], float, bool]:
@@ -76,9 +111,11 @@ def _hybrid_once(question:str,k:int,document_id:str | None)->tuple[list[SearchRe
 
 
 def search_documents(question:str,k:int,document_id:str | None)->list[SearchResult]:
-    final_chunks, best_dense_score, bm25_found=_hybrid_once(question, k, document_id)
-    # return if dense is strong enough, or bm25_found says the hybrid list is worth keeping
-    if best_dense_score>=MIN_SCORE or bm25_found:
+    
+    final_chunks = _multi_query_search(question, k, document_id)
+    best_dense_score = max((c["score"] for c in final_chunks), default=0.0)
+
+    if best_dense_score>=MIN_SCORE:
         return rerank(question, final_chunks)
 
     rewritten=rewrite_query(question) # one clearer wording; no second rewrite
@@ -90,5 +127,4 @@ def search_documents(question:str,k:int,document_id:str | None)->list[SearchResu
     if best_dense_score>=MIN_SCORE:
         return rerank(rewritten, final_chunks)
     return [] # still weak after rewrite
-
 
