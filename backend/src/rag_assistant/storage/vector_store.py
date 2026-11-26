@@ -31,7 +31,9 @@ def add_chunk_to_db(document_id:str,chunks:list[EmbeddedChunk])->int: # saves on
     documents=[] # one clean text per chunk , returned with search results
 
     for number, chunk in enumerate(chunks): # enumerate gives each chunk its position: 0, 1, 2...
-        ids.append(f"{document_id}--{number}") # stable ID: same file + same position = same ID
+        # parent chunks use their logical parent_id so get_parent_chunk_by_id can fetch them directly
+        chunk_id = chunk["parent_id"] if chunk["chunk_type"] == "parent" else f"{document_id}--{number}"
+        ids.append(chunk_id)
         documents.append(chunk["text"]) # clean chunk text , without the heading
         embeddings.append(chunk["embedding"]) # our own vector , so Chroma never embeds anything itself
         metadatas.append({
