@@ -18,6 +18,7 @@ def make_result(heading:str,text:str,page:int)->SearchResult:
         document_id="handbook.pdf",
         score=0.7,
         chunk_id=f"handbook.pdf--{page}",
+        parent_id=""
     )
 
 def test_found_answer_returns_cited_source()->None:
@@ -246,4 +247,47 @@ def test_injected_chunk_text_does_not_affect_response()->None:
     data=response.json()
     assert data["found"] is True
     assert "1234" not in data["answer"]  # injected secret must not appear in the response
+
+
+def test_enrich_replaces_child_text_with_parent_text() -> None:
+    # child chunk has a parent_id — enrich should swap its text for the parent's text
+    child_chunk = SearchResult(
+        text="Short child span.",
+        heading="Leave",
+        page_number=5,
+        end_page=5,
+        document_id="handbook.pdf",
+        score=0.7,
+        chunk_id="handbook.pdf--5",
+        parent_id="handbook.pdf--parent--0",
+    )
+
+    # mock get_parent_chunk_by_id inside _enrich_with_parent_text — returns "Full parent section text." instead of hitting Chroma
+    # so enriched_chunks[0]["text"] should now carry the parent text, not the original child span
+    with mock.patch.object(ask_service, "get_parent_chunk_by_id", autospec=True, return_value="Full parent section text.") as fake_get:
+        enriched_chunks = ask_service._enrich_with_parent_text([child_chunk])
+
+    assert enriched_chunks[0]["text"] == "Full parent section text."
+    fake_get.assert_called_once_with("handbook.pdf--parent--0")
+
+
+def test_enrich_skips_chunk_with_no_parent_id() -> None:
+    # chunk has parent_id="" — enrich should not call get_parent_chunk_by_id and leave text unchanged
+    child_chunk = SearchResult(
+        text="Short child span.",
+        heading="Leave",
+        page_number=5,
+        end_page=5,
+        document_id="handbook.pdf",
+        score=0.7,
+        chunk_id="handbook.pdf--5",
+        parent_id="",  # no parent — enrich should skip this chunk
+    )
+
+    # mock get_parent_chunk_by_id inside _enrich_with_parent_text — it should never be called since parent_id is empty
+    with mock.patch.object(ask_service, "get_parent_chunk_by_id", autospec=True) as fake_get:
+        enriched_chunks = ask_service._enrich_with_parent_text([child_chunk])
+
+    assert enriched_chunks[0]["text"] == "Short child span."
+    fake_get.assert_not_called()
     

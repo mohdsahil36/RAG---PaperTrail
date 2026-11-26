@@ -58,10 +58,13 @@ def _hybrid_once(question:str,k:int,document_id:str | None)->tuple[list[SearchRe
         dense_chunk_ids.append(dense_chunk["chunk_id"]) # ids for RRF
         chunks_by_id[dense_chunk["chunk_id"]]=dense_chunk # keep real dense scores in the lookup
 
+    # bm25 starts here - creating corpus
+
     collection=get_collection() # open the chunk store
+    child_filter: chromadb.Where = {"chunk_type": "child"}
     where: chromadb.Where | None = (
-        {"document_id": document_id} if document_id else None
-    ) # one file only when the caller asks for it
+        {"$and": [{"document_id": document_id}, child_filter]} if document_id else child_filter
+    )
     raw=collection.get(where=where, include=["documents", "metadatas"])
     corpus_texts=raw["documents"] or [] # all chunk texts for BM25
     corpus_meta=raw["metadatas"] or [] # heading and pages for each chunk
@@ -80,6 +83,7 @@ def _hybrid_once(question:str,k:int,document_id:str | None)->tuple[list[SearchRe
             document_id=cast(str, meta["document_id"]),
             score=0.0, # not from dense; BM25 may still use this id
             chunk_id=chunk_id,
+            parent_id=cast(str, meta.get("parent_id", ""))
         )
 
     bm25_ranked=bm25_search(question, corpus=corpus_texts, k=k) # search by keywords , result is in the format of index and score

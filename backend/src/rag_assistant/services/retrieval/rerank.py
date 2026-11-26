@@ -32,7 +32,7 @@ def rerank(
     # reorder only; keep dense chunk["score"]
     if not chunks:
         return []
-    if score_fn is None:
+    if score_fn is None: # this is not required for the production
         score_fn=cross_encoder_score
 
     texts = [chunk["text"] for chunk in chunks]

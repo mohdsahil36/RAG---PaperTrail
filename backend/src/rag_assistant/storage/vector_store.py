@@ -35,11 +35,13 @@ def add_chunk_to_db(document_id:str,chunks:list[EmbeddedChunk])->int: # saves on
         documents.append(chunk["text"]) # clean chunk text , without the heading
         embeddings.append(chunk["embedding"]) # our own vector , so Chroma never embeds anything itself
         metadatas.append({
-            "document_id": document_id,             # lets us filter or delete one document's chunks
-            "heading": chunk["heading"] or "",      # Chroma drops None, so store "" instead
-            "page_number": chunk["page_number"],    # page where the chunk's section starts
-            "end_page": chunk["end_page"],          # page where the chunk's section ends
-            "embedding_model": EMBEDDING_MODEL,     # which model made the vector , needed if we ever re-index
+            "document_id": document_id,
+            "heading": chunk["heading"] or "",
+            "page_number": chunk["page_number"],
+            "end_page": chunk["end_page"],
+            "embedding_model": EMBEDDING_MODEL,
+            "chunk_type": chunk["chunk_type"],
+            "parent_id": chunk["parent_id"],
         })
     collection.upsert(ids=ids,documents=documents,metadatas=metadatas,embeddings=embeddings) # one call for all chunks: inserts new IDs , replaces existing ones
     return len(ids) # number of chunks stored
@@ -51,7 +53,8 @@ class SearchResult(TypedDict):
     end_page: int
     document_id: str
     score: float  # similarity: 1.0 = same meaning, 0 = unrelated
-    chunk_id:str # unique ID for this chunk , used for RRF
+    chunk_id: str  # unique ID for this chunk , used for RRF
+    parent_id: str  # ID of the parent chunk; "" for parent chunks themselves
 
 def search_chunks(question: str, k: int = 5, document_id: str | None = None)->list[SearchResult]:
     if k<=0:
@@ -62,7 +65,10 @@ def search_chunks(question: str, k: int = 5, document_id: str | None = None)->li
         return []
 
     question_vector_embedding= embed_user_query(question) # same model and settings as the stored chunks
-    whereQuery: chromadb.Where | None = {"document_id":document_id} if document_id else None # filter by one document only when an ID is given , otherwise search everything
+    child_filter: chromadb.Where = {"chunk_type": "child"}
+    whereQuery: chromadb.Where | None = (
+        {"$and": [{"document_id": document_id}, child_filter]} if document_id else child_filter
+    )
     result = collection.query(query_embeddings=[question_vector_embedding], n_results=k, where = whereQuery) # a list of question vectors , we send one
 
     found: list[SearchResult] = []
@@ -84,8 +90,16 @@ def search_chunks(question: str, k: int = 5, document_id: str | None = None)->li
                 page_number=cast(int, metadata["page_number"]),
                 end_page=cast(int, metadata["end_page"]),
                 document_id=cast(str, metadata["document_id"]),
-                score=1-distance, # cosine distance -> similarity
-                chunk_id=chunk_id, # from result["ids"], not metadata
+                score=1-distance,
+                chunk_id=chunk_id,
+                parent_id=cast(str, metadata.get("parent_id", "")),
             )
         )
     return found
+
+def get_parent_chunk_by_id(parent_id:str)->str | None:
+    collection =get_collection()
+    data=collection.get(ids=[parent_id], include=["documents"])
+
+    parentText = data["documents"]
+    return parentText[0] if parentText else None

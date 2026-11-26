@@ -2,11 +2,23 @@ from rag_assistant.generation.llm_client import LLMError, answer_with_tools, gen
 from rag_assistant.generation.prompt_builder import NOT_FOUND_ANSWER, GROUNDING_RULES, build_prompt, build_stream_prompt, format_chunks
 from rag_assistant.schemas.ask_schema import AskResponse,Source
 from rag_assistant.services.search_documents_service import search_documents
+from rag_assistant.storage.vector_store import SearchResult, get_parent_chunk_by_id
 import re
 import json
 
 # finds [1], [12], ... in answer text; (\d+) is the number we keep
 _CITATION_RE = re.compile(r"\[(\d+)\]")
+
+def _enrich_with_parent_text(chunks: list[SearchResult]) -> list[SearchResult]:
+    # swap child text for parent text so Gemini sees the full section, not just the small span
+    enriched = []
+    for chunk in chunks:
+        if chunk["parent_id"]:
+            parent_text = get_parent_chunk_by_id(chunk["parent_id"])
+            if parent_text:
+                chunk = {**chunk, "text": parent_text} # create a copy of the chunk and replace the text value with the parent id 
+        enriched.append(chunk)
+    return enriched
 
 def _not_found(question:str)->AskResponse:
     return AskResponse(question=question, answer=NOT_FOUND_ANSWER, found=False, sources=[])
@@ -27,8 +39,9 @@ def _citations_from_answer(answer:str,chunk_count:int)->list[int]:
 
 def ask_question(question:str,k:int,document_id:str|None=None)->AskResponse:
     chunks=search_documents(question=question,k=k,document_id=document_id)
-    if not chunks: # nothing passed the minimum score , Gemini is never called
+    if not chunks:
         return _not_found(question)
+    chunks=_enrich_with_parent_text(chunks)
     system_prompt,user_prompt=build_prompt(question,chunks)
     llm_response=generate_answer(system_prompt,user_prompt)
     if not llm_response.found: # chunks were found but they do not have the answer
@@ -56,6 +69,7 @@ def stream_ask_question_events(question:str,k:int,document_id:str|None=None):
         if not chunks:
             yield f"data: {json.dumps({'type':'done','found':False,'sources':[]})}\n\n"
             return
+        chunks=_enrich_with_parent_text(chunks)
         system_prompt,user_prompt=build_stream_prompt(question,chunks)
         full_answer:list[str]=[]
         for token in stream_answer(system_prompt,user_prompt):
@@ -89,9 +103,10 @@ def ask_question_with_tools(question: str, k: int, document_id: str | None = Non
     #           we use this instead of answer_with_tool_result_and_context because gemini-3.5-flash-lite
     #           is a thinking model that ignores tool_config=NONE and keeps calling tools on multi-turn
     tool_args, _ = answer_with_tools(question)                                          # call 1 — query decision
-    chunks = search_documents(question=tool_args["query"], k=k, document_id=document_id)  # search with Gemini's query
+    chunks = search_documents(question=tool_args["query"], k=k, document_id=document_id)
     if not chunks:
         return _not_found(question)
+    chunks = _enrich_with_parent_text(chunks)
     system_prompt, user_prompt = build_prompt(question, chunks)  # original question + passages — defined in prompt_builder.py
     llm_response = generate_answer(system_prompt, user_prompt)   # call 2 — grounded JSON answer
     if not llm_response.found:

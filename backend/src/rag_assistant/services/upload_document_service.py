@@ -9,10 +9,19 @@ def upload_document(file_path: str, file_name:str):
 
     pages = load_file_from_path(file_path)
 
-    sections = build_sections(pages)  # group the text by heading
-    chunks = split_sections_into_chunks(sections)  # default size and overlap (1000 / 200) , made for real documents
-    embedded_chunks=embed_chunks(chunks) # convert the chunks to vectors
-    chunks_stored=add_chunk_to_db(file_name, embedded_chunks)
+    sections = build_sections(pages)
+    all_embedded: list = []
+
+    for i, section in enumerate(sections):
+        parent_id = f"{file_name}--parent--{i}"
+        parent_chunks = embed_chunks([section], chunk_type="parent", parent_id="")
+        all_embedded.extend(parent_chunks)
+
+        child_sections = split_sections_into_chunks([section])
+        child_chunks = embed_chunks(child_sections, chunk_type="child", parent_id=parent_id)
+        all_embedded.extend(child_chunks)
+
+    chunks_stored = add_chunk_to_db(file_name, all_embedded)
 
     # Testing only: uncomment to print sections and chunks for an uploaded PDF
     # print(f"\n===== {len(pages)} pages -> {len(sections)} sections -> {len(chunks)} chunks =====")
@@ -21,4 +30,4 @@ def upload_document(file_path: str, file_name:str):
     #     print(section["text"][:300] + ("..." if len(section["text"]) > 300 else ""))  # first 300 characters is enough to check
     # print(f"\n===== Chunk sizes: {[len(chunk['text']) for chunk in chunks]} =====\n")
 
-    return {"pages": pages, "chunks": chunks, "chunks_stored": chunks_stored}  # a dict with named keys , {pages, chunks} would be a set and fail
+    return {"pages": pages, "chunks": all_embedded, "chunks_stored": chunks_stored}  # a dict with named keys , {pages, chunks} would be a set and fail

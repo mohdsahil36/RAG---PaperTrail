@@ -10,6 +10,9 @@ def get_embedding_model()->SentenceTransformer: # Function with no inputs which 
 
 class EmbeddedChunk(DocumentSection):
     embedding:list[float] ## vector is 384 vector numbers (according to the current model) telling the chunk meaning , chroma and JSON cannot handle numpy arrays so we convert it into a list , make the vector from the chunk and get ready to save it to ChromaDB
+    chunk_type:str
+    parent_id:str
+
 
 def text_for_embedding(chunk:DocumentSection)->str: ## this is a helper function to get the text for the embedding , it combines the heading and the text of the chunk
     if chunk["heading"]:
@@ -17,7 +20,7 @@ def text_for_embedding(chunk:DocumentSection)->str: ## this is a helper function
     else:
         return chunk["text"]
 
-def embed_chunks(chunks:list[DocumentSection])->list[EmbeddedChunk]:
+def embed_chunks(chunks:list[DocumentSection], chunk_type:str="child", parent_id:str="")->list[EmbeddedChunk]:
     if not chunks: # no chunks (e.g. a PDF with no text) , return nothing without loading the model
         return []
 
@@ -39,7 +42,9 @@ def embed_chunks(chunks:list[DocumentSection])->list[EmbeddedChunk]:
             text=chunk["text"],
             page_number=chunk["page_number"],
             end_page=chunk["end_page"],
-            embedding=vector.tolist()
+            embedding=vector.tolist(),
+            chunk_type=chunk_type,
+            parent_id=parent_id,
         ))
     return embedded_chunks
 

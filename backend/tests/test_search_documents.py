@@ -11,6 +11,7 @@ def make_result(heading:str,text:str,page:int,score:float=0.7)->SearchResult:
         document_id="handbook.pdf",
         score=score,
         chunk_id=f"handbook.pdf--{page}",
+        parent_id=""
     )
 
 def test_strong_hit_skips_rewrite()->None:
