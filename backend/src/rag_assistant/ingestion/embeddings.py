@@ -21,6 +21,7 @@ def text_for_embedding(chunk:DocumentSection)->str: ## this is a helper function
         return chunk["text"]
 
 def embed_chunks(chunks:list[DocumentSection], chunk_type:str="child", parent_id:str="")->list[EmbeddedChunk]:
+    # default chunk type as child and default parent id as empty string
     if not chunks: # no chunks (e.g. a PDF with no text) , return nothing without loading the model
         return []
 
